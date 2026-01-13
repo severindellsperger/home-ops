@@ -1,6 +1,4 @@
-providerRegex: '^cp-.*'
-providerIpPrefixes: '10.0.0.0/24'
+providerRegex: '^dels-cp-.*'
+providerIpPrefixes: '172.16.254.0/24,fd00:254::/64'
 bypassDnsResolution: 'true'
-
-leaderElection: true
-replicas: 2
+replicas: 1

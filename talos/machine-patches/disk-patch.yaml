@@ -1,0 +1,17 @@
+---
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  diskSelector:
+    match: system_disk
+  maxSize: 50GiB
+---
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: local-system-nvme
+provisioning:
+  diskSelector:
+    match: system_disk
+  minSize: 50GiB
+  grow: true

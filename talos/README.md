@@ -2,26 +2,31 @@
 
 This is a basic Talos home lab config for a single node k8s cluster, which will be used as a 25 Gbit/s router/firewall and home server.
 
-Download to ISO from the [Talos Image Factory](https://factory.talos.dev/) and write to USB stick:
-```bash
-dd if=path/to/talos.iso of=/dev/sdX bs=4M status=progress conv=fsync
-```
+First create customized Talos ISO images with AMD GPU and CPU microcode support and secure boot enabled.
+The customized Talos ISO images can be found with secure boot enabled can be found under the following link:
+- [AMD-Metal-ISO-Secure-Boot-v1.12.1](https://factory.talos.dev/?arch=amd64&bootloader=auto&cmdline=talos.config%3Dmetal-iso&cmdline-set=true&extensions=-&extensions=siderolabs%2Famdgpu&extensions=siderolabs%2Famd-ucode&platform=metal&secureboot=true&target=metal&version=1.12.1)
 
-Metal ISO Factory URLs:
-- [AMD-Metal-ISO-Secure-Boot-v1.11.2](https://factory.talos.dev/?arch=amd64&cmdline=talos.config%3Dmetal-iso&cmdline-set=true&extensions=-&platform=metal&secureboot=true&target=metal&version=1.11.2)
-```bash
-```
-- [ARM-Metal-ISO-v1.11.2](https://factory.talos.dev/?arch=arm64&cmdline=talos.config%3Dmetal-iso&cmdline-set=true&extensions=-&platform=metal&target=metal&version=1.11.2)
-```bash
-```
+Hint: To update the version just change the version in the URL.
 
-To update just change the version in the URL.
-
-Following custimization is added to the Talos image via the factory URL:
+Following customization is added to the Talos image via the factory URL:
 ```yaml
 customization:
     extraKernelArgs:
         - talos.config=metal-iso
+    systemExtensions:
+        officialExtensions:
+            - siderolabs/amd-ucode
+            - siderolabs/amdgpu
+```
+
+From the [documentation](https://docs.siderolabs.com/talos/v1.12/reference/kernel): 
+`metal-iso`:  When the kernel parameter `talos.config=metal-iso` is set, Talos will attempt to load the machine configuration from any block device with a filesystem label of `metal-iso`. Talos will look for a file named `config.yaml` in the root of the filesystem.
+
+Hint: This customization ISO is made for the Minisforum MS-A2 mini PC with AMD CPU and GPU.
+
+Download to ISO from the [Talos Image Factory](https://factory.talos.dev/) and write to USB stick:
+```bash
+dd if=path/to/talos.iso of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
 
@@ -33,56 +38,48 @@ These secrets are stored in 1Password.
 
 Set environment variables for the Talos CLI:
 ```bash
-export CLUSTER_NAME=k8s-garden
-export K8s_API_ENDPOINT=https://api.k8s.garden:6443
+export CLUSTER_NAME=dels-cluster
+export K8s_API_ENDPOINT=https://api.dellsperger.me:6443
 ```
 
-Create the machine configurations using the secrets and machine patches.
-AMD node:
+In order to create the machine configurations, first create the machine patches under `machine-patches/` for each node.
+The `disk-patch.yaml` contains the disk layout configuration and ensures that there is an ephemeral partition for the system.
+Then the full configuration can be generated using the following commands.
+
+Hint: _If you install the cluster for the first time, you can already boot from the USB stick to get the correct interface and disk names. This is needed in order to create the correct machine patches._
+
 ```bash
-export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/d0b273850841b13d0193fbfb0597bac2ca30387b8a0797a43238ecafc72ed329:v1.11.5
-export NODE_NAME=cp-0
+export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.12.1
+export NODE_NAME=dels-cp-0
 talosctl gen config $CLUSTER_NAME $K8s_API_ENDPOINT \
   --with-secrets secrets.yaml \
   --config-patch @machine-patches/base-patch.yaml \
   --config-patch @machine-patches/$NODE_NAME-patch.yaml \
+  --config-patch @machine-patches/disk-patch.yaml \
   --output-types controlplane \
   --install-image $INSTALLER_IMAGE \
   --install-disk "" \
   --force \
-  -o machine-configs/cp-0.yaml
-```
-
-ARM node:
-```bash
-export INSTALLER_IMAGE=factory.talos.dev/metal-installer/d0b273850841b13d0193fbfb0597bac2ca30387b8a0797a43238ecafc72ed329:v1.11.2
-export NODE_NAME=vcp-0
-talosctl gen config $CLUSTER_NAME $K8s_API_ENDPOINT \
-  --with-secrets secrets.yaml \
-  --config-patch @machine-patches/base-patch.yaml \
-  --config-patch @machine-patches/$NODE_NAME-patch.yaml \
-  --output-types controlplane \
-  --install-image $INSTALLER_IMAGE \
-  --install-disk "" \
-  --force \
-  -o machine-configs/vcp-0.yaml
+  -o machine-configs/$NODE_NAME.yaml
 ```
 
 ## Initial config on first boot provided via ISO
+Mount a USB stick and call it `metal-iso`.
 Generate a `metal-iso` ISO with the new config and burn to additional USB stick:
 ```bash
-NODE_NAME=cp-0
+NODE_NAME=dels-cp-0
 cp machine-configs/$NODE_NAME.yaml metal-config/config.yaml
 
 mkisofs -joliet -rock -volid 'metal-iso' -output metal-config.iso metal-config/config.yaml
 # Or if you don't have mkisofs
 docker run --rm -v $(pwd)/:/data alpine:latest \
  sh -c "apk add cdrkit && mkisofs -joliet -rock -volid 'metal-iso' -output /data/metal-config.iso /data/metal-config/config.yaml"
+ sudo dd if=metal-config.iso of=/dev/disk4 bs=4M status=progress conv=fsync
+ rm -d metal-config.iso
 ```
+Hint: Adjust the disk path `/dev/disk4` accordingly.
 
-Write new ISO to USB stick.
-
-See [Metal ISO](https://www.talos.dev/v1.11/reference/kernel/#metal-iso) for more details.
+See [Metal ISO](https://www.talos.dev/v1.12/reference/kernel/#metal-iso) for more details.
 
 Or use talosctl to apply the config remotely:
 ```bash
@@ -104,7 +101,7 @@ Set the Talos endpoint, as the `--endpoints` flag does not work at the moment.
 You can also set the node so you don't have to provide `-n <IP_ADDRESS>` all the time.
 ```bash
 talosctl config merge talosconfig.yaml
-export IP_ADDRESS=10.0.0.4
+export IP_ADDRESS=172.16.254.1
 talosctl config endpoint $IP_ADDRESS
 talosctl config node $IP_ADDRESS
 ```
@@ -117,31 +114,40 @@ talosctl bootstrap
 
 ## Generate kubeconfig to access the k8s cluster
 ```bash
-talosctl kubeconfig ~/.kube/talos-k8s-garden.config
+talosctl kubeconfig ~/.kube/talos-dellsperger-me.config
 ```
+
+Hint: If secure boot option was not set to custom it's possible that Talos reports secure boot as false (since it's not working).
+If so, change the secure boot settings to Custom (allow keys to be written) and boot again from the Talos USB stick.
+Then select "install keys auto".
+Afterward, secure boot is enabled and reported as true.
+
 
 ## Base cilium setup
 
 ```bash
 helm repo add cilium https://helm.cilium.io
 helm repo update
-helm fetch cilium/cilium --version 1.18.2 --destination ../tmp
-helm upgrade --install cilium ../tmp/cilium-1.18.2.tgz \
+helm upgrade --install cilium cilium/cilium \
  --namespace kube-system \
  --values ../infra/cilium/app/values.yaml
-# Set ServiceMonitor.enabled: false for first apply
 ```
 
 ## Base CSR Approver setup
 ```bash
 helm repo add kubelet-csr-approver https://postfinance.github.io/kubelet-csr-approver
 helm repo update
-helm fetch kubelet-csr-approver/kubelet-csr-approver --version 1.2.11 --destination ../tmp
-helm upgrade --install kubelet-csr-approver ../tmp/kubelet-csr-approver-1.2.11.tgz \
- --version 1.2.11 \
+helm fetch kubelet-csr-approver/kubelet-csr-approver --version 1.2.12 
+helm upgrade --install kubelet-csr-approver kubelet-csr-approver/kubelet-csr-approver \
  --namespace kube-system \
  --values ../infra/kubelet-csr-approver/app/values.yaml
 ```
+
+Restart kubelet with after the CSR Approver is installed:
+```bash
+talosctl service kubelet restart
+```
+
 
 ## Single Node Cluster
 Make control plane node schedulable:
@@ -178,3 +184,35 @@ machine:
 ```
 Alternatively run a DHCP/DNS server on old router and just use Talos as a firewall/router.
 Enable IP forwarding and masquerading(at least for IPv4) in Cilium?
+
+
+### VyOS
+Since VyOs does not provide a docker image, we have to build it ourself.
+
+
+```bash
+
+
+### Generate the config for another update
+```bash
+export CLUSTER_NAME=dels-cluster
+export K8s_API_ENDPOINT=https://api.dellsperger.me:6443
+export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.12.1
+export NODE_NAME=dels-cp-0
+talosctl gen config $CLUSTER_NAME $K8s_API_ENDPOINT \
+  --with-secrets secrets.yaml \
+  --config-patch @machine-patches/base-patch.yaml \
+  --config-patch @machine-patches/$NODE_NAME-patch.yaml \
+  --config-patch @machine-patches/disk-patch.yaml \
+  --output-types controlplane \
+  --install-image $INSTALLER_IMAGE \
+  --install-disk "" 
+  --force \
+  -o machine-configs/$NODE_NAME.yaml
+```
+Re-apply the config using:
+
+After the first boot you can always re-apply the config using:
+```bash
+talosctl apply-config --file machine-configs/$NODE_NAME.yaml
+```

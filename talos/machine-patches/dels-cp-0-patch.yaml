@@ -1,0 +1,59 @@
+machine:
+  certSANs:
+    - dels-cp-0.dellsperger.me
+    - dels-cp-0.local
+    - dels-cp-0
+  features:
+    hostDNS:
+      enabled: true
+    kubernetesTalosAPIAccess:
+      allowedKubernetesNamespaces:
+        - system-upgrade # tuppr
+      allowedRoles:
+        - os:admin
+      enabled: true
+  install:
+    wipe: true
+    diskSelector:
+      type: nvme # Consider NVMe Disks only
+  kubelet:
+    nodeIP:
+      # The `validSubnets` field configures the networks to pick kubelet node IP from.
+      validSubnets:
+        - 172.16.254.0/24
+        - fd00:254::/64
+  network:
+    hostname: dels-cp-0
+    interfaces:
+      # LAN
+      - interface: lo0
+        dummy: true
+      - interface: br0
+        addresses:
+          - 172.16.254.1/24
+          - fd00:254::1/64
+        bridge:
+          stp:
+            enabled: false
+          interfaces:
+            - lo0
+            - enp3s0
+            # - enp4s0
+            # - enp5s0f0np0
+            # - enp5s0f1np1
+        routes:
+          - network: 172.16.254.0/24
+        dhcp: false
+      # WAN
+      # - interface: enp2s0f0np0
+      #   dhcp: true
+      #   dhcpOptions:
+      #     ipv4: true
+      #     ipv6: false
+cluster:
+  controlPlane:
+    endpoint: https://172.16.254.1:6443 # Endpoint is the canonical controlplane endpoint, which can be an IP address or a DNS hostname.
+  etcd:
+    advertisedSubnets: # listenSubnets defaults to advertisedSubnets if not set explicitly
+      - 172.16.254.0/24
+      - fd00:254::/64
