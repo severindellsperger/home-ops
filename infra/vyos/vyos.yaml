@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vyos-state
+  namespace: priviledged
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vyos
+  namespace: priviledged
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vyos
+  template:
+    metadata:
+      labels:
+        app: vyos
+    spec:
+      hostname: vyos
+      hostNetwork: true
+      containers:
+      - name: vyos
+        image: ghcr.io/severindellsperger/vyos-container:latest
+        stdin: true
+        tty: true
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+              - NET_ADMIN
+              - NET_RAW
+              - SYS_ADMIN
+        lifecycle:
+          postStart:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  # Neutralize modprobe and rmmod for the VyOS config engine
+                  ln -sf /bin/true /usr/sbin/modprobe
+                  ln -sf /bin/true /sbin/modprobe
+                  ln -sf /bin/true /usr/sbin/rmmod
+                  ln -sf /bin/true /sbin/rmmod
+        volumeMounts:
+          - name: vyos-config
+            mountPath: /opt/vyatta/etc/config
+          - name: vyos-state
+            mountPath: /config
+      volumes:
+        - name: vyos-config
+          configMap:
+            name: vyos-config
+            defaultMode: 0777
+        - name: vyos-state
+          persistentVolumeClaim:
+            claimName: vyos-state

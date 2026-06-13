@@ -1,4 +1,13 @@
 machine:
+  kernel:
+    modules:
+      - name: nf_tables
+      - name: nft_nat
+      - name: nft_chain_nat
+      - name: nft_masq
+      - name: nft_ct
+      - name: br_netfilter
+      - name: bridge
   certSANs:
     - dels-cp-0.dellsperger.me
     - dels-cp-0.local
@@ -23,9 +32,8 @@ machine:
         - 172.16.254.0/24
         - fd00:254::/64
   network:
-    hostname: dels-cp-0
     interfaces:
-      # LAN
+      # Mgmt
       - interface: lo0
         dummy: true
       - interface: br0
@@ -37,19 +45,35 @@ machine:
             enabled: false
           interfaces:
             - lo0
-            - enp3s0
+            - enp5s0f0np0 # Right SFP NIC
             # - enp4s0
             # - enp5s0f0np0
             # - enp5s0f1np1
         routes:
           - network: 172.16.254.0/24
         dhcp: false
+      # LAN
+      - interface: enp3s0 # Left 2.5Gbit NIC
+        dhcp: true
+      - interface: enp4s0 # Right 2.5Gbit NIC
+        dhcp: false
+        addresses:
+          - 10.0.97.1/24
+      #   dhcp: false
       # WAN
+      - interface: enp7s0f0np0
+        dhcp: false
+        ignore: true
       # - interface: enp2s0f0np0
       #   dhcp: true
       #   dhcpOptions:
       #     ipv4: true
       #     ipv6: false
+  sysctls:
+    net.ipv4.conf.all.log_martians: "0"
+    net.ipv4.conf.default.log_martians: "0"
+    net.ipv4.conf.enp4s0.log_martians: "0"
+
 cluster:
   controlPlane:
     endpoint: https://172.16.254.1:6443 # Endpoint is the canonical controlplane endpoint, which can be an IP address or a DNS hostname.
@@ -57,3 +81,8 @@ cluster:
     advertisedSubnets: # listenSubnets defaults to advertisedSubnets if not set explicitly
       - 172.16.254.0/24
       - fd00:254::/64
+---
+apiVersion: v1alpha1
+kind: HostnameConfig
+hostname: dels-cp-0
+auto: off

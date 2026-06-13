@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vyos-config
+  namespace: priviledged
+data:
+  config.boot: |
+    interfaces {
+        ethernet enp4s0 {
+            address 10.0.97.1/24
+            description LAN
+        }
+        ethernet enp7s0f1np1 {
+            address dhcp
+            description WAN
+        }
+        loopback lo {
+        }
+    }
+    nat {
+        source {
+            rule 100 {
+                outbound-interface {
+                    name enp7s0f1np1
+                }
+                source {
+                    address 10.0.97.0/24
+                }
+                translation {
+                    address masquerade
+                }
+            }
+        }
+    }
+    service {
+        dhcp-server {
+            shared-network-name LAN {
+                subnet 10.0.97.0/24 {
+                    lease 86400
+                    option {
+                        default-router 10.0.97.1
+                        name-server 10.0.97.1
+                    }
+                    range 0 {
+                        start 10.0.97.50
+                        stop 10.0.97.150
+                    }
+                    static-mapping wifi-ap {
+                        description "gl-inet fix dhcp lease"
+                        ip-address 10.0.97.2
+                        mac 94:83:c4:b1:86:65
+                    }
+                    subnet-id 1
+                }
+            }
+        }
+        dns {
+            forwarding {
+                allow-from 10.0.97.0/24
+                listen-address 10.0.97.1
+            }
+        }
+        ntp {
+            allow-client {
+                address 127.0.0.0/8
+                address 10.0.97.0/24
+            }
+            server 0.ch.pool.ntp.org {
+                pool
+            }
+            server 1.ch.pool.ntp.org {
+                pool
+            }
+        }
+        ssh {
+            disable-password-authentication
+            listen-address 10.0.97.1
+            port 22
+        }
+    }
+    system {
+        config-management {
+            commit-revisions 100
+        }
+        console {
+            device ttyS0 {
+                speed 115200
+            }
+        }
+        login {
+            user admin {
+                authentication {
+                    public-keys admin@vyos {
+                        key AAAAC3NzaC1lZDI1NTE5AAAAIP+e3TnaNHpXfDbGgkyaLvwmVOAPxjkrfQEAJ1SZ9vIO
+                        type ssh-ed25519
+                    }
+                }
+            }
+        }
+        syslog {
+            local {
+                facility all {
+                    level info
+                }
+                facility local7 {
+                    level debug
+                }
+            }
+        }
+    }

@@ -49,7 +49,7 @@ Then the full configuration can be generated using the following commands.
 Hint: _If you install the cluster for the first time, you can already boot from the USB stick to get the correct interface and disk names. This is needed in order to create the correct machine patches._
 
 ```bash
-export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.12.1
+export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.12.5
 export NODE_NAME=dels-cp-0
 talosctl gen config $CLUSTER_NAME $K8s_API_ENDPOINT \
   --with-secrets secrets.yaml \
@@ -186,13 +186,6 @@ Alternatively run a DHCP/DNS server on old router and just use Talos as a firewa
 Enable IP forwarding and masquerading(at least for IPv4) in Cilium?
 
 
-### VyOS
-Since VyOs does not provide a docker image, we have to build it ourself.
-
-
-```bash
-
-
 ### Generate the config for another update
 ```bash
 export CLUSTER_NAME=dels-cluster
@@ -206,7 +199,7 @@ talosctl gen config $CLUSTER_NAME $K8s_API_ENDPOINT \
   --config-patch @machine-patches/disk-patch.yaml \
   --output-types controlplane \
   --install-image $INSTALLER_IMAGE \
-  --install-disk "" 
+  --install-disk "" \
   --force \
   -o machine-configs/$NODE_NAME.yaml
 ```
