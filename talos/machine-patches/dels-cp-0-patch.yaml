@@ -31,48 +31,6 @@ machine:
       validSubnets:
         - 172.16.254.0/24
         - fd00:254::/64
-  network:
-    interfaces:
-      # Mgmt
-      - interface: lo0
-        dummy: true
-      - interface: br0
-        addresses:
-          - 172.16.254.1/24
-          - fd00:254::1/64
-        bridge:
-          stp:
-            enabled: false
-          interfaces:
-            - lo0
-            - enp5s0f0np0 # Right SFP NIC
-            # - enp4s0
-            # - enp5s0f0np0
-            # - enp5s0f1np1
-        routes:
-          - network: 172.16.254.0/24
-        dhcp: false
-      # LAN
-      - interface: enp3s0 # Left 2.5Gbit NIC
-        dhcp: true
-      - interface: enp4s0 # Right 2.5Gbit NIC
-        dhcp: false
-        addresses:
-          - 10.0.97.1/24
-      #   dhcp: false
-      # WAN
-      - interface: enp7s0f0np0
-        dhcp: false
-        ignore: true
-      # - interface: enp2s0f0np0
-      #   dhcp: true
-      #   dhcpOptions:
-      #     ipv4: true
-      #     ipv6: false
-  sysctls:
-    net.ipv4.conf.all.log_martians: "0"
-    net.ipv4.conf.default.log_martians: "0"
-    net.ipv4.conf.enp4s0.log_martians: "0"
 
 cluster:
   controlPlane:
@@ -86,3 +44,38 @@ apiVersion: v1alpha1
 kind: HostnameConfig
 hostname: dels-cp-0
 auto: off
+---
+# Mgmt: dummy member keeps br-mgmt carrier up even if the SFP link (enp5s0f0np0) drops
+apiVersion: v1alpha1
+kind: DummyLinkConfig
+name: dummy0
+---
+apiVersion: v1alpha1
+kind: BridgeConfig
+name: br-mgmt
+links:
+  - dummy0
+  - enp5s0f0np0 # Right SFP NIC
+stp:
+  enabled: false
+addresses:
+  - address: 172.16.254.1/24
+  - address: fd00:254::1/64
+---
+# LAN: Access Points on enp3s0/enp4s0, bridged onto the same L2 segment.
+# STP left enabled since two uplinks into one bridge could form a loop.
+apiVersion: v1alpha1
+kind: BridgeConfig
+name: br-lan
+links:
+  - enp3s0 # Left 2.5Gbit NIC
+  - enp4s0 # Right 2.5Gbit NIC
+stp:
+  enabled: true
+addresses:
+  - address: 10.0.97.1/24
+---
+# WAN
+apiVersion: v1alpha1
+kind: DHCPv4Config
+name: enp7s0f1np1

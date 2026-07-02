@@ -190,7 +190,7 @@ Enable IP forwarding and masquerading(at least for IPv4) in Cilium?
 ```bash
 export CLUSTER_NAME=dels-cluster
 export K8s_API_ENDPOINT=https://api.dellsperger.me:6443
-export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.12.1
+export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.12.5
 export NODE_NAME=dels-cp-0
 talosctl gen config $CLUSTER_NAME $K8s_API_ENDPOINT \
   --with-secrets secrets.yaml \
