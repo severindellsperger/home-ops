@@ -7,11 +7,9 @@ data:
   config.boot: |
     interfaces {
         ethernet enp4s0 {
-            address 10.0.97.1/24
             description LAN
         }
         ethernet enp7s0f1np1 {
-            address dhcp
             description WAN
         }
         loopback lo {
