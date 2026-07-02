@@ -4,7 +4,7 @@ This is a basic Talos home lab config for a single node k8s cluster, which will 
 
 First create customized Talos ISO images with AMD GPU and CPU microcode support and secure boot enabled.
 The customized Talos ISO images can be found with secure boot enabled can be found under the following link:
-- [AMD-Metal-ISO-Secure-Boot-v1.12.1](https://factory.talos.dev/?arch=amd64&bootloader=auto&cmdline=talos.config%3Dmetal-iso&cmdline-set=true&extensions=-&extensions=siderolabs%2Famdgpu&extensions=siderolabs%2Famd-ucode&platform=metal&secureboot=true&target=metal&version=1.12.1)
+- [AMD-Metal-ISO-Secure-Boot-v1.13.5](https://factory.talos.dev/?arch=amd64&bootloader=auto&cmdline=talos.config%3Dmetal-iso&cmdline-set=true&extensions=-&extensions=siderolabs%2Famdgpu&extensions=siderolabs%2Famd-ucode&platform=metal&secureboot=true&target=metal&version=1.13.5)
 
 Hint: To update the version just change the version in the URL.
 
@@ -19,7 +19,7 @@ customization:
             - siderolabs/amdgpu
 ```
 
-From the [documentation](https://docs.siderolabs.com/talos/v1.12/reference/kernel): 
+From the [documentation](https://docs.siderolabs.com/talos/v1.13/reference/kernel): 
 `metal-iso`:  When the kernel parameter `talos.config=metal-iso` is set, Talos will attempt to load the machine configuration from any block device with a filesystem label of `metal-iso`. Talos will look for a file named `config.yaml` in the root of the filesystem.
 
 Hint: This customization ISO is made for the Minisforum MS-A2 mini PC with AMD CPU and GPU.
@@ -49,7 +49,7 @@ Then the full configuration can be generated using the following commands.
 Hint: _If you install the cluster for the first time, you can already boot from the USB stick to get the correct interface and disk names. This is needed in order to create the correct machine patches._
 
 ```bash
-export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.12.5
+export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.13.5
 export NODE_NAME=dels-cp-0
 talosctl gen config $CLUSTER_NAME $K8s_API_ENDPOINT \
   --with-secrets secrets.yaml \
@@ -79,7 +79,7 @@ docker run --rm -v $(pwd)/:/data alpine:latest \
 ```
 Hint: Adjust the disk path `/dev/disk4` accordingly.
 
-See [Metal ISO](https://www.talos.dev/v1.12/reference/kernel/#metal-iso) for more details.
+See [Metal ISO](https://www.talos.dev/v1.13/reference/kernel/#metal-iso) for more details.
 
 Or use talosctl to apply the config remotely:
 ```bash
@@ -190,7 +190,7 @@ Enable IP forwarding and masquerading(at least for IPv4) in Cilium?
 ```bash
 export CLUSTER_NAME=dels-cluster
 export K8s_API_ENDPOINT=https://api.dellsperger.me:6443
-export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.12.5
+export INSTALLER_IMAGE=factory.talos.dev/metal-installer-secureboot/b4ad7bee3282d3c8b0a5a171eebee32be8f7d91ace5942bcb2126b3a7edc7846:v1.13.5
 export NODE_NAME=dels-cp-0
 talosctl gen config $CLUSTER_NAME $K8s_API_ENDPOINT \
   --with-secrets secrets.yaml \

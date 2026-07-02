@@ -44,8 +44,8 @@ data:
                         stop 10.0.97.150
                     }
                     static-mapping wifi-ap {
-                        description "gl-inet fix dhcp lease"
-                        ip-address 10.0.97.2
+                        description "ap1 (living room) fix dhcp lease"
+                        ip-address 10.0.97.10
                         mac 94:83:c4:b1:86:65
                     }
                     subnet-id 1
