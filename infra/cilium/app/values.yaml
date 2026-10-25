@@ -19,14 +19,13 @@ k8sServicePort: 7445
 
 # Gateway API support
 gatewayAPI:
-  enabled: true
+  enabled: true # Requires Gateway API CRDs to be installed first
   enableAlpn: true
   enableAppProtocol: true
 
-# Ingress Support for backward compatibility with older applications
+# Ingress disabled in favour of Gateway API
 ingressController:
-  enabled: true
-  loadbalancerMode: shared
+  enabled: false
 
 # IPv6 support
 ipv6:
