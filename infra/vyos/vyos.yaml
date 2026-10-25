@@ -29,9 +29,26 @@ spec:
     spec:
       hostname: vyos
       hostNetwork: true
+      initContainers:
+      - name: flush-vyos-nft
+        image: ghcr.io/severindellsperger/vyos-container:1.5-stream-2025-Q2
+        command:
+          - /bin/bash
+          - -c
+          - |
+            for t in "ip vyos_filter" "ip6 vyos_filter" "bridge vyos_filter" \
+                     "ip vyos_nat" "ip vyos_static_nat" \
+                     "ip vyos_mangle" "ip6 vyos_mangle" \
+                     "ip vyos_conntrack" "ip6 vyos_conntrack"; do
+              nft delete table $t 2>/dev/null || true
+            done
+        securityContext:
+          capabilities:
+            add:
+              - NET_ADMIN
       containers:
       - name: vyos
-        image: ghcr.io/severindellsperger/vyos-container:latest
+        image: ghcr.io/severindellsperger/vyos-container:1.5-stream-2025-Q2
         stdin: true
         tty: true
         securityContext:

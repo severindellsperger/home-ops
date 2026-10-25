@@ -15,6 +15,45 @@ data:
         loopback lo {
         }
     }
+    firewall {
+        ipv4 {
+            name WAN-IN {
+                description "Block unsolicited inbound traffic from WAN"
+                default-action drop
+                rule 10 {
+                    action accept
+                    state established
+                    state related
+                }
+                rule 20 {
+                    action drop
+                    state invalid
+                }
+            }
+            input {
+                filter {
+                    rule 10 {
+                        action jump
+                        jump-target WAN-IN
+                        inbound-interface {
+                            name enp7s0f1np1
+                        }
+                    }
+                }
+            }
+            forward {
+                filter {
+                    rule 10 {
+                        action jump
+                        jump-target WAN-IN
+                        inbound-interface {
+                            name enp7s0f1np1
+                        }
+                    }
+                }
+            }
+        }
+    }
     nat {
         source {
             rule 100 {
@@ -43,10 +82,15 @@ data:
                         start 10.0.97.50
                         stop 10.0.97.150
                     }
-                    static-mapping wifi-ap {
+                    static-mapping wifi-ap1 {
                         description "ap1 (living room) fix dhcp lease"
                         ip-address 10.0.97.10
                         mac 94:83:c4:b1:86:65
+                    }
+                    static-mapping wifi-ap2 {
+                        description "ap2 (office) fix dhcp lease"
+                        ip-address 10.0.97.11
+                        mac 94:83:c4:b7:ed:39
                     }
                     subnet-id 1
                 }
