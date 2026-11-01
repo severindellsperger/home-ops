@@ -27,8 +27,12 @@ spec:
       labels:
         app: vyos
     spec:
-      hostname: vyos
-      hostNetwork: true
+      hostNetwork: true # Pod uses the node's hostname (dels-cp-0), spec.hostname is ignored
+      # Make the node hostname resolvable inside the pod (fixes "sudo: unable to resolve host dels-cp-0")
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames:
+            - dels-cp-0
       initContainers:
       - name: flush-vyos-nft
         image: ghcr.io/severindellsperger/vyos-container:1.5-stream-2025-Q2

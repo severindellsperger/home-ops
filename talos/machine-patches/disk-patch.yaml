@@ -1,4 +1,13 @@
 ---
+# Install Talos on the Kingston KC3000 512GB (only NVMe < 1TB).
+# The two 2TB NVMe disks (Kingston KC3000, Crucial P310) stay untouched for the later ZFS mirror.
+apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+provisioning:
+  diskSelector:
+    match: disk.transport == 'nvme' && disk.size < 1u * TB
+  wipe: true
+---
 apiVersion: v1alpha1
 kind: VolumeConfig
 name: EPHEMERAL

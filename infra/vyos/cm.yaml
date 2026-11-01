@@ -53,6 +53,48 @@ data:
                 }
             }
         }
+        ipv6 {
+            name WAN6-IN {
+                description "Block unsolicited inbound IPv6 traffic from WAN"
+                default-action drop
+                rule 10 {
+                    action accept
+                    state established
+                    state related
+                }
+                rule 20 {
+                    action drop
+                    state invalid
+                }
+                rule 30 {
+                    action accept
+                    description "ICMPv6 (neighbor discovery, router advertisements/SLAAC, path MTU)"
+                    protocol ipv6-icmp
+                }
+            }
+            input {
+                filter {
+                    rule 10 {
+                        action jump
+                        jump-target WAN6-IN
+                        inbound-interface {
+                            name enp7s0f1np1
+                        }
+                    }
+                }
+            }
+            forward {
+                filter {
+                    rule 10 {
+                        action jump
+                        jump-target WAN6-IN
+                        inbound-interface {
+                            name enp7s0f1np1
+                        }
+                    }
+                }
+            }
+        }
     }
     nat {
         source {

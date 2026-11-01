@@ -1,37 +1,47 @@
-machine:
-  features:
-    kubePrism:
-      enabled: true
-      port: 7445
-  install:
-    wipe: true
-    diskSelector:
-  sysctls:
-    net.ipv4.ip_forward: 1
-    net.ipv6.conf.all.forwarding: 1
-  kubelet:
-    extraArgs:
-      rotate-server-certificates: true
-cluster:
-  allowSchedulingOnControlPlanes: true
-  controllerManager:
-    extraArgs:
-      node-cidr-mask-size-ipv6: 96
-  controlPlane:
-    endpoint: https://172.16.254.1:6443 # Endpoint is the canonical controlplane endpoint, which can be an IP address or a DNS hostname.
-  clusterName: dels-cluster # Configures the cluster's name.
-  network:
-    # Disable for cilium
-    cni:
-      name: none # Name of CNI to use.
-    # The pod subnet CIDR.
-    podSubnets:
-      - 10.244.0.0/16
-      - fdee::/80
-    # The service subnet CIDR.
-    serviceSubnets:
-      - 10.96.0.0/12
-      - fdee:1::/108
-  proxy:
-    # Disable kube-proxy deployment on cluster bootstrap.
-    disabled: true
+apiVersion: v1alpha1
+kind: KubeClusterConfig
+clusterName: dels-cluster # Configures the cluster's name.
+endpoint: https://172.16.254.1:6443 # Endpoint is the canonical controlplane endpoint, which can be an IP address or a DNS hostname.
+---
+apiVersion: v1alpha1
+kind: KubeNetworkConfig
+# The pod subnet CIDR.
+podSubnets:
+  - 10.244.0.0/16
+  - fdee::/80
+# The service subnet CIDR.
+serviceSubnets:
+  - 10.96.0.0/12
+  - fdee:1::/108
+nodeCIDRMaskSizeIPv6: 96
+---
+# Drop the generated KubeNodeConfig (it carries the control-plane NoSchedule taint).
+# It is redefined without taints in the node patch, so workloads can run on the control plane.
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+$patch: delete
+---
+apiVersion: v1alpha1
+kind: KubeletConfig
+config:
+  serverTLSBootstrap: true # Serving certs signed via CSR (approved by kubelet-csr-approver)
+---
+# Disable for cilium
+apiVersion: v1alpha1
+kind: KubeFlannelCNIConfig
+$patch: delete
+---
+# Disable kube-proxy deployment on cluster bootstrap (replaced by cilium).
+apiVersion: v1alpha1
+kind: KubeProxyConfig
+enabled: false
+---
+apiVersion: v1alpha1
+kind: KubePrismConfig
+port: 7445
+---
+apiVersion: v1alpha1
+kind: SysctlConfig
+params:
+  net.ipv4.ip_forward: "1"
+  net.ipv6.conf.all.forwarding: "1"

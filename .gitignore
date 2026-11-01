@@ -4,6 +4,7 @@ talos/machine-configs
 talos/metal-config
 talos/metal-config.iso
 /tmp
+.claude/
 
 # Drawio backup files
 .$*.drawio.bkp

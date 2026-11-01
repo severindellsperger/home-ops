@@ -1,243 +1,119 @@
-### Genereal
-The home router is installed in the Kubernetes cluster as a Pod. The VyOS Pod is running in the `priviledged` namespace with privileged access to the host network stack. 
-It servers as default gateway for the LAN network (10.0.97.1) and provides DHCP, DNS (caching), NAT and firewall services. The WAN interface is connected to the host network (enp7s0f1np1) and the LAN interface is connected to a private network (enp4s0).
-The deployment is installed with the following command: 
-```
-kubectl apply -f vyos.yaml
-```
+# VyOS (LAN Router)
 
-### Notes
-This are the steps to run VyOS in a Kubernetes Pod with privileged access and additional network interfaces using Multus.
+VyOS runs as a single privileged pod with `hostNetwork: true` on `dels-cp-0` and is the router for the LAN (`10.0.97.0/24`, Wi-Fi access points).
+It provides DHCP, DNS forwarding, NAT, the WAN firewall (IPv4 + IPv6) and NTP.
 
-1. Create namespace `priviledged` with Pod Security `privileged`:
-k create namespace priviledged
-kubectl label namespace priviledged pod-security.kubernetes.io/enforce=privileged
+It is **not** managed by Flux: the LAN has no internet before VyOS runs, so it is applied manually during the cluster setup (see [`talos/README.md`](../../talos/README.md#11-vyos-lan-router)).
 
-2. Run the vyos pod
-````
-k apply -n priviledged -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vyos-old
-spec:
-  hostNetwork: true
-  containers:
-  - name: vyos
-    image: ghcr.io/severindellsperger/vyos-container:latest
-    securityContext:
-     privileged: true 
-EOF
-````
+| File | Content |
+|---|---|
+| `cm.yaml` | ConfigMap `vyos-config` with the VyOS `config.boot` (the complete router configuration) |
+| `vyos.yaml` | PVC `vyos-state` and Deployment `vyos` |
 
-```
-kubectl apply -n priviledged -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vyos
-  namespace: priviledged
-  labels:
-    app: vyos
-spec:
-  hostNetwork: true
-  # hostAliases injects the hostname into /etc/hosts automatically
-  hostAliases:
-  - ip: "127.0.0.1"
-    hostnames:
-    - "dels-cp-0"
-  containers:
-  - name: vyos
-    image: ghcr.io/severindellsperger/vyos-container:latest
-    stdin: true
-    tty: true
-    securityContext:
-      privileged: true
-      capabilities:
-        add: 
-          - NET_ADMIN
-          - NET_RAW
-          - SYS_ADMIN
-    # This script runs immediately after the container starts
-    lifecycle:
-      postStart:
-        exec:
-          command:
-            - /bin/bash
-            - -c
-            - |
-              # Neutralize modprobe and rmmod for the VyOS config engine
-              ln -sf /bin/true /usr/sbin/modprobe
-              ln -sf /bin/true /sbin/modprobe
-              ln -sf /bin/true /usr/sbin/rmmod
-              ln -sf /bin/true /sbin/rmmod
-              # Ensure the hostname is mapped (failsafe for hostAliases)
-              echo "127.0.0.1 dels-cp-0" >> /etc/hosts
-    volumeMounts:
-      - name: modules
-        mountPath: /lib/modules
-        readOnly: true
-      - name: config
-        mountPath: /config
-  volumes:
-    - name: modules
-      hostPath:
-        path: /lib/modules
-        type: Directory
-    - name: config
-      emptyDir: {} # Switch to a PVC or HostPath if you want config to survive Pod deletion
-EOF
-```
+## Who does what
 
-3. Access the vyos pod
+| Talos (machine config) | VyOS (`config.boot`) |
+|---|---|
+| Interfaces, bridges and IP addresses: `br-lan` (`enp3s0` + `enp4s0`, `10.0.97.1/24`), `br-mgmt` (`172.16.254.1/24`) | DHCP server for the LAN (`10.0.97.50-150`, static leases for the APs `.10`/`.11`) |
+| WAN address via DHCP (`enp7s0f1np1`), IPv6 via SLAAC | DNS forwarding on `10.0.97.1` for the LAN |
+| IP forwarding (`SysctlConfig`) | NAT masquerade `10.0.97.0/24` → WAN |
+| Kernel modules (`nf_tables`, `nft_nat`, `nft_masq`, `bridge`, ...) | IPv4/IPv6 firewall for traffic from the WAN |
+| | NTP for the LAN, SSH on `10.0.97.1` |
+
+VyOS doesn't configure addresses on interfaces. The interfaces in `config.boot` only carry descriptions, the addresses come from Talos.
+Interface names in `config.boot` must match the Talos interface names (they can change when PCIe devices are added, check with `talosctl get links`).
+
+## How it works
+
+- **Config (`cm.yaml`)**: The ConfigMap is mounted read-only at `/opt/vyatta/etc/config/config.boot`, where VyOS loads its boot config from.
+  It is loaded **once at pod start** and is the only source of truth.
+  Changes made live with `configure` / `commit` work immediately, but are lost on the next pod restart (`save` fails as the file is read-only).
+- **State (`vyos-state` PVC)**: Mounted at `/config` (local-path storage). Holds runtime state, e.g. DHCP leases.
+- **Host network**: VyOS works directly in the node's network namespace. Its nftables tables (`ip vyos_filter`, `ip6 vyos_filter`, `ip vyos_nat`, ...) live next to the Talos table (`inet talos`) and Cilium's rules.
+- **Init container `flush-vyos-nft`**: Because the nftables tables belong to the host, they survive a pod restart. The init container deletes the old `vyos_*` tables before VyOS starts, so VyOS can recreate them cleanly from `config.boot`.
+  Consequence: if VyOS fails to load the config, the node has **no** VyOS firewall/NAT at all. Always verify after a restart.
+- **`postStart` hook**: Replaces `modprobe` / `rmmod` with `/bin/true`. Kernel modules can't be loaded from the container; Talos loads them (`KernelModuleConfig`).
+- **`hostAliases`**: With `hostNetwork` the pod has the node hostname `dels-cp-0`, which is added to `/etc/hosts` (otherwise `sudo` complains `unable to resolve host`).
+
+## Firewall and NAT
+
+| Rule set | Hooked into | Rules |
+|---|---|---|
+| `ipv4 name WAN-IN` | `input` + `forward` filter for traffic from `enp7s0f1np1` | accept established/related, drop invalid, **default drop** |
+| `ipv6 name WAN6-IN` | `input` + `forward` filter for traffic from `enp7s0f1np1` | accept established/related, drop invalid, accept ICMPv6, **default drop** |
+| `nat source rule 100` | postrouting | masquerade `10.0.97.0/24` out of `enp7s0f1np1` |
+
+- `input` protects the node itself (Talos API `50000`, Kubernetes API `6443`, kubelet `10250`, ...), `forward` protects the LAN.
+- ICMPv6 must be allowed: the node gets its public IPv6 address via router advertisements (SLAAC), and neighbor discovery and path MTU discovery depend on ICMPv6.
+- Traffic from LAN/management interfaces is not filtered (default accept).
+
+## Deploy and change the config
+
+Initial deployment (namespace with privileged Pod Security, as VyOS needs privileged host access):
 ```bash
-kubectl exec -n priviledged -it vyos -- su - vyos 
-```
-4. Configure VyOS inside the Pod
-```
-configure
-# Interface Config
-set interfaces ethernet enp7s0f1np1 address dhcp
-set interfaces ethernet enp7s0f1np1 description 'WAN'
-set interfaces ethernet enp4s0 address '10.0.97.1/24'
-set interfaces ethernet enp4s0 description 'LAN'
-# SSH
-set service ssh port '22'
-set service ssh listen-address '10.0.97.1'
-
-# NTP
-set service ntp server 0.ch.pool.ntp.org pool
-set service ntp server 1.ch.pool.ntp.org pool
-# DHCP 
-set service dhcp-server shared-network-name LAN subnet 10.0.97.0/24 option default-router '10.0.97.1'
-set service dhcp-server shared-network-name LAN subnet 10.0.97.0/24 option name-server '10.0.97.1'
-set service dhcp-server shared-network-name LAN subnet 10.0.97.0/24 lease '86400'
-set service dhcp-server shared-network-name LAN subnet 10.0.97.0/24 range 0 start '10.0.97.50'
-set service dhcp-server shared-network-name LAN subnet 10.0.97.0/24 range 0 stop '10.0.97.150'
-set service dhcp-server shared-network-name LAN subnet 10.0.97.0/24 subnet-id '1'
-# DNS
-set service dns forwarding listen-address '10.0.97.1'
-set service dns forwarding allow-from '10.0.97.0/24'
-# NAT
-set nat source rule 100 outbound-interface name 'enp7s0f1np1'
-set nat source rule 100 source address '10.0.97.0/24'
-set nat source rule 100 translation address masquerade
-# Firewall 
-## Firewall Groups
-set firewall group interface-group 'WAN' interface 'enp7s0f1np1'
-set firewall group interface-group 'LAN' interface 'enp4s0'
-set firewall group network-group NET-LAN-v4 network '10.0.97.0/24'
-## Global Options
-set firewall global-options state-policy established action accept
-set firewall global-options state-policy related action accept
-set firewall global-options state-policy invalid action drop
-## Block Incoming Traffic from WAN to LAN
-set firewall ipv4 name WAN-IN default-action 'drop'
-set firewall ipv4 forward filter rule 100 action jump
-set firewall ipv4 forward filter rule 100 jump-target WAN-IN
-set firewall ipv4 forward filter rule 100 inbound-interface group WAN
-set firewall ipv4 forward filter rule 100 destination group network-group NET-LAN-v4
-set firewall ipv4 input filter default-action 'drop'
-## Allow Management Access from LAN
-set firewall ipv4 name VyOS_MANAGEMENT default-action 'return'
-set firewall ipv4 input filter rule 20 action jump
-set firewall ipv4 input filter rule 20 jump-target VyOS_MANAGEMENT
-set firewall ipv4 input filter rule 20 destination port 22
-set firewall ipv4 input filter rule 20 protocol tcp
-set firewall ipv4 name VyOS_MANAGEMENT rule 15 action 'accept'
-set firewall ipv4 name VyOS_MANAGEMENT rule 15 inbound-interface group 'LAN'
-## Allow ICMP and DNS from LAN
-set firewall ipv4 input filter rule 30 action 'accept'
-set firewall ipv4 input filter rule 30 icmp type-name 'echo-request'
-set firewall ipv4 input filter rule 30 protocol 'icmp'
-set firewall ipv4 input filter rule 30 state new
-set firewall ipv4 input filter rule 40 action 'accept'
-set firewall ipv4 input filter rule 40 destination port '53'
-set firewall ipv4 input filter rule 40 protocol 'tcp_udp'
-set firewall ipv4 input filter rule 40 source group network-group NET-LAN-v4
-##Allow Localhost Traffic
-set firewall ipv4 input filter rule 50 action 'accept'
-set firewall ipv4 input filter rule 50 source address 127.0.0.0/8
-# Hardening
-set system login user admin authentication public-keys admin@vyos key AAAAC3NzaC1lZDI1NTE5AAAAIP+e3TnaNHpXfDbGgkyaLvwmVOAPxjkrfQEAJ1SZ9vIO 
-set system login user admin authentication public-keys admin@vyos type ssh-ed25519
-set service ssh disable-password-authentication
-# Commit with confirmation
-commit-confirm 5
-
-
-
-
+kubectl create namespace priviledged
+kubectl label namespace priviledged pod-security.kubernetes.io/enforce=privileged
+kubectl apply -f infra/vyos/cm.yaml -f infra/vyos/vyos.yaml
+kubectl -n priviledged rollout status deploy/vyos
 ```
 
-# 1) Install Multus CNI:
-
-Follow official Talos Mutlus Guideline: https://docs.siderolabs.com/kubernetes-guides/cni/multus
-
-`kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset-thick.yml`
-
-# 2) Create a NetworkAttachmentDefinition for the additional interface:
-```
-kubectl apply -f - <<EOF
-apiVersion: "k8s.cni.cncf.io/v1"
-kind: NetworkAttachmentDefinition
-metadata:
-  name: external-wan
-  namespace: priviledged
-spec:
-  config: '{
-      "cniVersion": "0.3.1",
-      "type": "macvlan",
-      "master": "enp4s0", 
-      "mode": "bridge",
-     "ipam": {
-        "type": "host-local",
-        "subnet": "192.168.1.0/24",
-        "rangeStart": "192.168.1.200",
-        "rangeEnd": "192.168.1.216",
-        "routes": [
-          { "dst": "0.0.0.0/0" }
-        ],
-        "gateway": "192.168.1.1"
-      }
-    }'
-EOF
+Changing the config: edit `cm.yaml`, apply and restart (the LAN loses connectivity for 1-2 minutes, management access is not affected):
+```bash
+kubectl apply -f infra/vyos/cm.yaml
+kubectl -n priviledged rollout restart deploy/vyos
+kubectl -n priviledged rollout status deploy/vyos
 ```
 
-kubectl apply -f - <<EOF
-apiVersion: "k8s.cni.cncf.io/v1"
-kind: NetworkAttachmentDefinition
-metadata:
-  name: external-wan
-  namespace: priviledged
-spec:
-  config: '{
-      "cniVersion": "0.3.1",
-      "type": "host-device",
-      "device": "enp4s0", 
-     "ipam": {
-        "type": "static"
-      }
-    }'
-EOF
+Tip: test a change live first (`configure`, `set ...`, `commit-confirm 5`, `confirm`), then copy the result into `cm.yaml` (`show configuration` prints it in `config.boot` format).
 
+## Access
 
-# 3) Create the VyOS Pod with Multus annotation:
+```bash
+kubectl -n priviledged exec -it deploy/vyos -- su - vyos    # VyOS CLI (op mode, `configure` for config mode)
+ssh admin@10.0.97.1                                          # from the LAN, SSH key only
 ```
-kubectl apply -n priviledged -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vyos
-  namespace: priviledged
-  annotations:
-    k8s.v1.cni.cncf.io/networks: '[ { "name": "external-wan", "interface": "eth1", "ips": ["192.168.1.12/24"] } ]'
-spec:
-  containers:
-  - name: vyos
-    image: ghcr.io/severindellsperger/vyos-container:latest
-    imagePullPolicy: Never
-    securityContext:
-      privileged: true # Required for VyOS to manage the network stack
-EOF
+
+## Verify
+
+In the VyOS CLI:
 ```
+show firewall                 # ipv4 + ipv6 rule sets with counters
+show nat source rules         # rule 100 masquerade
+show dhcp server leases
+show interfaces
+```
+
+nftables on the host (from the VyOS pod or a node debug pod, e.g. `kubectl debug node/dels-cp-0 -n priviledged -it --profile=sysadmin --image=nicolaka/netshoot`):
+```bash
+nft list tables                                   # vyos_filter (ip/ip6), vyos_nat, ...
+nft list table ip vyos_filter
+nft list chain ip6 vyos_filter NAME6_WAN6-IN      # drop counter should increase
+nft list table ip vyos_nat
+```
+
+External test: must run **from outside** (e.g. mobile hotspot). From the LAN, traffic to the WAN IP arrives on `br-lan` and never passes `WAN-IN`, so ports look open.
+For IPv6 the scanning device needs real IPv6 connectivity (check with test-ipv6.com), otherwise `filtered` means nothing.
+```bash
+nmap -Pn -p 22,50000,6443,10250 <WAN_IPv4>        # expected: filtered
+nmap -6 -Pn -p 22,50000,6443,10250 <WAN_IPv6>     # expected: filtered
+```
+
+### Known harmless log messages
+
+| Message | Reason |
+|---|---|
+| `Config file '/opt/vyatta/etc/config/config.boot' not writeable`, `Read-only file system` | Config comes from the read-only ConfigMap |
+| `PermissionError: ... /sys/kernel/debug/dynamic_debug` | No debugfs inside the container |
+| `nfct ... netlink error: Invalid argument` | Conntrack timeout tuning not allowed from the container, kernel defaults apply |
+| `perl: warning: Setting locale failed` | Missing locale in the image |
+
+## Open points
+
+- **IPv6 for LAN clients**: Currently only the node has IPv6 (SLAAC on the WAN). LAN clients would need a prefix via DHCPv6-PD from the ISP and router advertisements on `br-lan` (then the `WAN6-IN` forward rules become relevant and DHCPv6 replies (UDP 546) must be allowed on the WAN).
+- **Firewall for LAN → node**: The LAN can reach all node services (Talos API, Kubernetes API, ...). Restrict to what is needed (DHCP, DNS, NTP, SSH).
+- **SSH listens only on the LAN** (`10.0.97.1`): Consider adding `172.16.254.1` for access from the management network.
+- **Pinned image**: `ghcr.io/severindellsperger/vyos-container:1.5-stream-2025-Q2` (VyOS 1.5 stream, July 2025). Update to a newer stream release.
+- **Flux**: VyOS is applied manually. It could be added to Flux after the bootstrap (the manual apply is still needed for the first install).
+- **VyManager**: A web UI for VyOS ([community-vyprojects](https://github.com/community-vyprojects)) that configures VyOS via its HTTPS API (REST/GraphQL, API key). A local docker-compose test setup exists under `tmp/vymanager/` (not in git, contains secrets).
+  It conflicts with the GitOps approach: changes via the API are only live and are lost on the next pod restart, as `config.boot` comes from the read-only ConfigMap.
+  Options if it is deployed: use it only for testing/viewing and copy changes into `cm.yaml`, or move the config to the PVC (persistent, but no longer declared in git).
