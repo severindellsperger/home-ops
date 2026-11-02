@@ -35,7 +35,7 @@ spec:
             - dels-cp-0
       initContainers:
       - name: flush-vyos-nft
-        image: ghcr.io/severindellsperger/vyos-container:1.5-stream-2025-Q2
+        image: ghcr.io/severindellsperger/vyos-container:2026.03
         command:
           - /bin/bash
           - -c
@@ -52,7 +52,7 @@ spec:
               - NET_ADMIN
       containers:
       - name: vyos
-        image: ghcr.io/severindellsperger/vyos-container:1.5-stream-2025-Q2
+        image: ghcr.io/severindellsperger/vyos-container:2026.03
         stdin: true
         tty: true
         securityContext:
@@ -75,10 +75,15 @@ spec:
                   ln -sf /bin/true /usr/sbin/rmmod
                   ln -sf /bin/true /sbin/rmmod
         volumeMounts:
-          - name: vyos-config
-            mountPath: /opt/vyatta/etc/config
+          # VyOS bind-mounts /opt/vyatta/etc/config onto /config at boot, so the
+          # directory must be writable (DHCP leases, config archive). Only
+          # config.boot comes read-only from the ConfigMap.
           - name: vyos-state
-            mountPath: /config
+            mountPath: /opt/vyatta/etc/config
+          - name: vyos-config
+            mountPath: /opt/vyatta/etc/config/config.boot
+            subPath: config.boot
+            readOnly: true
       volumes:
         - name: vyos-config
           configMap:

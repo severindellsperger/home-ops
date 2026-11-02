@@ -25,10 +25,11 @@ Interface names in `config.boot` must match the Talos interface names (they can 
 
 ## How it works
 
-- **Config (`cm.yaml`)**: The ConfigMap is mounted read-only at `/opt/vyatta/etc/config/config.boot`, where VyOS loads its boot config from.
+- **Config (`cm.yaml`)**: Only the `config.boot` key of the ConfigMap is mounted (`subPath`, read-only) at `/opt/vyatta/etc/config/config.boot`, where VyOS loads its boot config from.
   It is loaded **once at pod start** and is the only source of truth.
   Changes made live with `configure` / `commit` work immediately, but are lost on the next pod restart (`save` fails as the file is read-only).
-- **State (`vyos-state` PVC)**: Mounted at `/config` (local-path storage). Holds runtime state, e.g. DHCP leases.
+- **State (`vyos-state` PVC)**: Mounted at `/opt/vyatta/etc/config` (local-path storage). Holds runtime state, e.g. DHCP leases (`dhcp/`) and the commit archive (`archive/`).
+  At boot VyOS bind-mounts `/opt/vyatta/etc/config` onto `/config`, so the directory itself must be writable: if it were read-only (e.g. the whole ConfigMap mounted there), `service dhcp-server` and `system config-management` fail to commit and are silently missing from the running config.
 - **Host network**: VyOS works directly in the node's network namespace. Its nftables tables (`ip vyos_filter`, `ip6 vyos_filter`, `ip vyos_nat`, ...) live next to the Talos table (`inet talos`) and Cilium's rules.
 - **Init container `flush-vyos-nft`**: Because the nftables tables belong to the host, they survive a pod restart. The init container deletes the old `vyos_*` tables before VyOS starts, so VyOS can recreate them cleanly from `config.boot`.
   Consequence: if VyOS fails to load the config, the node has **no** VyOS firewall/NAT at all. Always verify after a restart.
@@ -112,7 +113,7 @@ nmap -6 -Pn -p 22,50000,6443,10250 <WAN_IPv6>     # expected: filtered
 - **IPv6 for LAN clients**: Currently only the node has IPv6 (SLAAC on the WAN). LAN clients would need a prefix via DHCPv6-PD from the ISP and router advertisements on `br-lan` (then the `WAN6-IN` forward rules become relevant and DHCPv6 replies (UDP 546) must be allowed on the WAN).
 - **Firewall for LAN → node**: The LAN can reach all node services (Talos API, Kubernetes API, ...). Restrict to what is needed (DHCP, DNS, NTP, SSH).
 - **SSH listens only on the LAN** (`10.0.97.1`): Consider adding `172.16.254.1` for access from the management network.
-- **Pinned image**: `ghcr.io/severindellsperger/vyos-container:1.5-stream-2025-Q2` (VyOS 1.5 stream, July 2025). Update to a newer stream release.
+- **Pinned image**: `ghcr.io/severindellsperger/vyos-container:2026.03` (VyOS 2026.03, circinus). `config.boot` has no version footer, so VyOS runs all migration scripts on every boot; check the logs for migration errors after an image update.
 - **Flux**: VyOS is applied manually. It could be added to Flux after the bootstrap (the manual apply is still needed for the first install).
 - **VyManager**: A web UI for VyOS ([community-vyprojects](https://github.com/community-vyprojects)) that configures VyOS via its HTTPS API (REST/GraphQL, API key). A local docker-compose test setup exists under `tmp/vymanager/` (not in git, contains secrets).
   It conflicts with the GitOps approach: changes via the API are only live and are lost on the next pod restart, as `config.boot` comes from the read-only ConfigMap.
